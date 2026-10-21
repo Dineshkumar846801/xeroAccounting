@@ -1,69 +1,8 @@
-import Image from "next/image";
+﻿"use client";
+import { useState } from "react";
+const invoices=[{id:"INV-1048",client:"Northstar Studio",date:"18 Oct 2026",due:"01 Nov 2026",status:"Sent",balance:"$4,800.00",total:"$4,800.00"},{id:"INV-1047",client:"Morrow & Co.",date:"15 Oct 2026",due:"29 Oct 2026",status:"Overdue",balance:"$2,150.00",total:"$2,150.00"},{id:"INV-1046",client:"Lumen Architecture",date:"12 Oct 2026",due:"26 Oct 2026",status:"Paid",balance:"$0.00",total:"$7,250.00"},{id:"INV-1045",client:"Cedar & Pine",date:"08 Oct 2026",due:"22 Oct 2026",status:"Draft",balance:"$1,920.00",total:"$1,920.00"}];
+const accounts=[{name:"Operating Account",code:"1000",type:"Bank",amount:"$86,420.50",tone:"mint"},{name:"Accounts Receivable",code:"1100",type:"Current Asset",amount:"$24,680.00",tone:"blue"},{name:"Accounts Payable",code:"2000",type:"Current Liability",amount:"$9,240.00",tone:"amber"}];
+const icons:Record<string,string>={grid:"M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z",book:"M5 4.5A2.5 2.5 0 0 1 7.5 2H20v17H7.5A2.5 2.5 0 0 0 5 21.5m0-17v17M5 4.5H4a2 2 0 0 0-2 2v14h16",invoice:"M6 2h10l4 4v16H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm9 0v5h5M8 12h8M8 16h6",chart:"M4 19V5m0 14h16M8 16v-4m4 4V8m4 8V4",settings:"M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5ZM19 12h3m-20 0h3m7-10v3m0 14v3",search:"m20 20-4.4-4.4m2.4-5.1A7.5 7.5 0 1 1 3 10.5a7.5 7.5 0 0 1 15 0Z",bell:"M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4",arrow:"M5 12h14m-6-6 6 6-6 6"};
+function Icon({name}:{name:string}){return <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={icons[name]}/></svg>}
+export default function Home(){const [query,setQuery]=useState("");const list=invoices.filter(x=>`${x.id} ${x.client}`.toLowerCase().includes(query.toLowerCase()));return <div className="content-inner"><div className="page-heading"><div><p className="eyebrow">Wednesday, 21 October 2026</p><h1>Good morning, Jordan <span>✦</span></h1><p className="subheading">Here&apos;s what&apos;s happening with your business.</p></div><button className="date-button">This month <span>⌄</span></button></div><div className="metric-grid">{[["Total accounts","24","↗ 4.3%","book","blue-bg"],["Total invoices","48","↗ 12.5%","invoice","purple-bg"],["Accounts receivable","$24,680","↗ 8.2%","$","mint-bg"],["Overdue receivables","$3,920","↘ 2.1%","!","coral-bg"]].map(([title,value,trend,icon,tone])=><article className="metric-card" key={title}><div className="metric-top"><span>{title}</span><div className={`metric-icon ${tone}`}>{icons[icon]?<Icon name={icon}/>:icon}</div></div><strong>{value}</strong><p className="metric-note"><span className={trend.startsWith("↘")?"trend down":"trend up"}>{trend}</span> vs last month</p></article>)}</div><div className="main-grid"><article className="panel chart-panel"><div className="panel-heading"><div><h2>Receivables overview</h2><p>Outstanding invoices over the last 6 months</p></div><div className="legend"><span><i className="legend-dot teal"/>Collected</span><span><i className="legend-dot light-teal"/>Outstanding</span></div></div><div className="chart"><div className="y-labels"><span>$30k</span><span>$20k</span><span>$10k</span><span>$0</span></div><div className="chart-body"><div className="grid-line one"/><div className="grid-line two"/><div className="grid-line three"/><div className="grid-line four"/><svg viewBox="0 0 650 210" preserveAspectRatio="none" className="chart-svg"><defs><linearGradient id="fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="#5ac7ae" stopOpacity=".22"/><stop offset="1" stopColor="#5ac7ae" stopOpacity="0"/></linearGradient></defs><path d="M0 160 C55 152 75 135 130 143 S210 95 260 112 S340 124 390 90 S470 67 520 80 S600 38 650 46 L650 210 L0 210Z" fill="url(#fill)"/><path d="M0 160 C55 152 75 135 130 143 S210 95 260 112 S340 124 390 90 S470 67 520 80 S600 38 650 46" fill="none" stroke="#49b99f" strokeWidth="3"/><path d="M0 184 C60 177 85 167 130 173 S205 150 260 160 S345 162 390 145 S475 137 520 144 S600 118 650 126" fill="none" stroke="#a8dfd3" strokeWidth="3" strokeDasharray="5 5"/></svg><div className="x-labels"><span>May</span><span>Jun</span><span>Jul</span><span>Aug</span><span>Sep</span><span>Oct</span></div></div></div></article><article className="panel receivable-panel"><div className="panel-heading"><div><h2>Receivables status</h2><p>By invoice status</p></div><button className="more-button">•••</button></div><div className="donut-wrap"><div className="donut"><div><strong>$24.7k</strong><span>Total due</span></div></div><div className="status-list"><div><span><i className="status-dot teal"/>Current</span><strong>$17,320</strong></div><div><span><i className="status-dot amber"/>Due soon</span><strong>$3,440</strong></div><div><span><i className="status-dot coral"/>Overdue</span><strong>$3,920</strong></div></div></div><div className="source-note"><span className="info">i</span> Data will be connected to your PostgreSQL database</div></article></div><div className="lower-grid"><article className="panel table-panel"><div className="panel-heading"><div><h2>Recent invoices</h2><p>Your latest sales invoices</p></div><button className="text-button">View all <Icon name="arrow"/></button></div><div className="table-toolbar"><div className="search-box"><Icon name="search"/><input aria-label="Search invoices" placeholder="Search invoices" value={query} onChange={e=>setQuery(e.target.value)}/></div><button className="filter-button">All statuses <span>⌄</span></button></div><div className="table-scroll"><table><thead><tr><th>Invoice</th><th>Client</th><th>Due date</th><th>Status</th><th className="align-right">Amount due</th></tr></thead><tbody>{list.map(x=><tr key={x.id}><td><strong>{x.id}</strong><small>{x.date}</small></td><td>{x.client}</td><td>{x.due}</td><td><span className={`pill ${x.status.toLowerCase()}`}><i/>{x.status}</span></td><td className="align-right"><strong>{x.balance}</strong><small>of {x.total}</small></td></tr>)}</tbody></table></div></article><article className="panel accounts-panel"><div className="panel-heading"><div><h2>Chart of accounts</h2><p>Account balances at a glance</p></div><button className="text-button">View all <Icon name="arrow"/></button></div><div className="account-list">{accounts.map(x=><div className="account-row" key={x.code}><div className={`account-icon ${x.tone}`}><Icon name={x.type==="Bank"?"book":x.type==="Current Asset"?"chart":"invoice"}/></div><div className="account-name"><strong>{x.name}</strong><span>{x.code} · {x.type}</span></div><strong>{x.amount}</strong></div>)}</div><button className="add-account">+ Add account</button></article></div><p className="footer-note"><span className="live-dot"/>All data shown is sample data · Connect PostgreSQL to get started</p></div>}
 
-export default function Home() {
-  return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
-  );
-}
