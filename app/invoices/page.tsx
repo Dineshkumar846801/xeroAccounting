@@ -1,2 +1,6 @@
-﻿import DataPage from "../components/data-page";
-export default function InvoicesPage(){return <DataPage eyebrow="SALES / INVOICING" title="Invoices" description="Track sales invoices, due dates, statuses, and outstanding amounts." action="New invoice" columns={["Invoice","Contact","Invoice date","Due date","Status","Total","Amount due"]} rows={[["INV-1048","Northstar Studio","18 Oct 2026","01 Nov 2026","Sent","$4,800.00","$4,800.00"],["INV-1047","Morrow & Co.","15 Oct 2026","29 Oct 2026","Overdue","$2,150.00","$2,150.00"],["INV-1046","Lumen Architecture","12 Oct 2026","26 Oct 2026","Paid","$7,250.00","$0.00"],["INV-1045","Cedar & Pine","08 Oct 2026","22 Oct 2026","Draft","$1,920.00","$1,920.00"]]}/>}
+import { connection } from "next/server";
+import { Suspense } from "react";
+import DataPage from "../components/data-page";
+import { date, getReportingData, money } from "../lib/reporting";
+async function Content(){await connection();const data=await getReportingData();return <DataPage eyebrow="SALES / INVOICING" title="Invoices" description="Live sales invoices synchronized from Xero." columns={["Invoice","Contact","Invoice date","Due date","Status","Total","Amount due"]} state={data.state} rows={data.invoices.map(i=>[i.invoice_number??"—",i.contact_name,date(i.invoice_date),date(i.due_date),i.status,money(i.total),money(i.amount_due)])}/>}
+export default function InvoicesPage(){return <Suspense fallback={<div className="content-inner">Loading invoices…</div>}><Content/></Suspense>}

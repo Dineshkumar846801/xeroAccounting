@@ -1,2 +1,6 @@
-﻿import DataPage from "../components/data-page";
-export default function AccountsPage(){return <DataPage eyebrow="ACCOUNTING / DIRECTORY" title="Chart of accounts" description="Review account codes, types, statuses, and balances." action="Add account" columns={["Code","Account name","Type","Status","Balance"]} rows={[["1000","Operating Account","Bank","Active","$86,420.50"],["1100","Accounts Receivable","Current Asset","Active","$24,680.00"],["1200","Inventory","Current Asset","Active","$12,350.00"],["2000","Accounts Payable","Current Liability","Active","$9,240.00"],["3000","Owner’s Equity","Equity","Active","$54,880.00"]]}/>}
+import { connection } from "next/server";
+import { Suspense } from "react";
+import DataPage from "../components/data-page";
+import { getReportingData, money } from "../lib/reporting";
+async function Content(){await connection();const data=await getReportingData();return <DataPage eyebrow="ACCOUNTING / DIRECTORY" title="Chart of accounts" description="Live chart of accounts synchronized from Xero." columns={["Code","Account name","Type","Status","Balance"]} state={data.state} rows={data.accounts.map(a=>[a.code??"—",a.name,a.type??"—",a.status??"—",money(a.balance)])}/>}
+export default function AccountsPage(){return <Suspense fallback={<div className="content-inner">Loading accounts…</div>}><Content/></Suspense>}

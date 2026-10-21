@@ -1,14 +1,7 @@
-﻿import DataPage from "../components/data-page";
+import DataPage from "../components/data-page";
+import XeroConnection from "../components/xero-connection";
+import { Suspense } from "react";
+import { requireAdmin } from "../lib/auth";
 
-export default function SettingsPage() {
-  return (
-    <DataPage
-      eyebrow="WORKSPACE / PREFERENCES"
-      title="Settings"
-      description="Workspace preferences and database connection setup."
-      columns={["Setting", "Value", "Status"]}
-      rows={[["Database", "PostgreSQL", "Not connected"], ["Workspace", "Acme Studio", "Active"]]}
-      note="Database credentials and connection configuration can be added when backend setup begins."
-    />
-  );
-}
+async function SettingsContent(){await requireAdmin();return <div className="content-inner"><div className="page-heading"><div><p className="eyebrow">WORKSPACE / PREFERENCES</p><h1>Settings</h1><p className="subheading">Manage your secure Xero integration.</p></div></div><Suspense fallback={<section className="panel xero-panel"/>}><XeroConnection/></Suspense><DataPage eyebrow="DATABASE" title="Workspace settings" description="PostgreSQL is used for encrypted credentials and synchronized Xero records." columns={["Setting","Value","Status"]} rows={[["Database","PostgreSQL","Configured"],["Access","Administrator","Protected"]]} note="Xero credentials are encrypted in PostgreSQL and can be changed above."/></div>}
+export default function SettingsPage(){return <Suspense fallback={<div className="content-inner">Loading secure settings…</div>}><SettingsContent/></Suspense>}
