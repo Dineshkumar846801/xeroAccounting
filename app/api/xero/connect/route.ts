@@ -8,12 +8,22 @@ const DEFAULT_SCOPES = "openid profile email offline_access accounting.invoices.
 
 export async function GET(request: Request) {
   if (!(await assertApiAdmin())) return NextResponse.redirect(new URL("/login", request.url));
-  let clientId:string, redirectUri:string;
-  try { ({clientId,redirectUri}=await getXeroConfig()); } catch { return NextResponse.redirect(new URL("/settings?xero=error", request.url)); }
+  let clientId: string, redirectUri: string, scopes: string;
+  try {
+    ({ clientId, redirectUri, scopes } = await getXeroConfig());
+  } catch {
+    return NextResponse.redirect(new URL("/settings?xero=error", request.url));
+  }
 
   const state = crypto.randomBytes(32).toString("hex");
   const authorizeUrl = new URL("https://login.xero.com/identity/connect/authorize");
-  authorizeUrl.search = new URLSearchParams({ response_type: "code", client_id: clientId, redirect_uri: redirectUri, scope: process.env.XERO_SCOPES ?? DEFAULT_SCOPES, state }).toString();
+  authorizeUrl.search = new URLSearchParams({
+    response_type: "code",
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    scope: scopes,
+    state,
+  }).toString();
   const response = NextResponse.redirect(authorizeUrl);
   response.cookies.set("xero_oauth_state", state, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", maxAge: 600, path: "/" });
   return response;

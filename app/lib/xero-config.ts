@@ -1,13 +1,23 @@
 import { db, ensureSchema } from "./db";
 import { decrypt, encrypt } from "./tokens";
-const fallbackRedirect="http://localhost:3000/api/xero/callback";
-export async function getXeroConfig(){
+
+const fallbackRedirect = "http://localhost:3000/api/xero/callback";
+export const DEFAULT_SCOPES = "openid profile email offline_access accounting.invoices.read accounting.contacts.read accounting.settings.read accounting.reports.read accounting.transactions.read";
+
+export async function getXeroConfig() {
   await ensureSchema();
-  const result=await db().query<{client_id:string;client_secret:string;redirect_uri:string}>("SELECT client_id,client_secret,redirect_uri FROM xero_credentials WHERE id=true");
-  const row=result.rows[0];
-  if(row){
+  const result = await db().query<{ client_id: string; client_secret: string; redirect_uri: string; scopes: string | null }>(
+    "SELECT client_id, client_secret, redirect_uri, scopes FROM xero_credentials WHERE id=true"
+  );
+  const row = result.rows[0];
+  if (row) {
     try {
-      return {clientId:decrypt(row.client_id),clientSecret:decrypt(row.client_secret),redirectUri:row.redirect_uri};
+      return {
+        clientId: decrypt(row.client_id),
+        clientSecret: decrypt(row.client_secret),
+        redirectUri: row.redirect_uri,
+        scopes: row.scopes || process.env.XERO_SCOPES || DEFAULT_SCOPES,
+      };
     } catch {
       // In case key changed or decryption fails, check env
     }
@@ -16,9 +26,25 @@ export async function getXeroConfig(){
     return {
       clientId: process.env.XERO_CLIENT_ID,
       clientSecret: process.env.XERO_CLIENT_SECRET,
-      redirectUri: process.env.XERO_REDIRECT_URI || fallbackRedirect
+      redirectUri: process.env.XERO_REDIRECT_URI || fallbackRedirect,
+      scopes: process.env.XERO_SCOPES || DEFAULT_SCOPES,
     };
   }
   throw new Error("Configure Xero credentials in Settings first");
 }
-export async function saveXeroConfig(clientId:string,clientSecret:string,redirectUri:string){await ensureSchema();await db().query("INSERT INTO xero_credentials (id,client_id,client_secret,redirect_uri) VALUES (true,$1,$2,$3) ON CONFLICT (id) DO UPDATE SET client_id=EXCLUDED.client_id,client_secret=EXCLUDED.client_secret,redirect_uri=EXCLUDED.redirect_uri,updated_at=now()",[encrypt(clientId),encrypt(clientSecret),redirectUri||fallbackRedirect]);}
+
+export async function saveXeroConfig(clientId: string, clientSecret: string, redirectUri: string, scopes?: string) {
+  await ensureSchema();
+  const selectedScopes = scopes?.trim() || process.env.XERO_SCOPES || DEFAULT_SCOPES;
+  await db().query(
+    `INSERT INTO xero_credentials (id, client_id, client_secret, redirect_uri, scopes)
+     VALUES (true, $1, $2, $3, $4)
+     ON CONFLICT (id) DO UPDATE SET
+       client_id = EXCLUDED.client_id,
+       client_secret = EXCLUDED.client_secret,
+       redirect_uri = EXCLUDED.redirect_uri,
+       scopes = EXCLUDED.scopes,
+       updated_at = now()`,
+    [encrypt(clientId), encrypt(clientSecret), redirectUri || fallbackRedirect, selectedScopes]
+  );
+}
