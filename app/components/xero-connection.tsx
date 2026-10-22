@@ -14,24 +14,74 @@ export default function XeroConnection() {
   const searchParams = useSearchParams();
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [configMessage, setConfigMessage] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
   const status = searchParams.get("xero");
+  const reason = searchParams.get("reason");
   const organisation = searchParams.get("organisation");
-  const message = status && status in statusMessages ? statusMessages[status as keyof typeof statusMessages] : null;
+
+  let oauthBanner: { text: string; isError: boolean } | null = null;
+  if (status === "connected") {
+    oauthBanner = {
+      text: `✓ Xero connection verified successfully! Connected organisation: ${organisation || "Active Organisation"}.`,
+      isError: false,
+    };
+  } else if (status === "cancelled") {
+    oauthBanner = {
+      text: "The Xero authorization process was cancelled.",
+      isError: true,
+    };
+  } else if (status === "error") {
+    if (reason === "invalid_client" || reason === "invalid_credentials") {
+      oauthBanner = {
+        text: "Xero Authentication Failed: Invalid Client ID or Client Secret. The credentials stored in PostgreSQL do not match your registered app in the Xero Developer Portal. Please verify your Client ID and Client Secret below and click Save.",
+        isError: true,
+      };
+    } else if (reason) {
+      oauthBanner = {
+        text: `Xero Connection Failed: ${reason}`,
+        isError: true,
+      };
+    } else {
+      oauthBanner = {
+        text: "Xero could not complete the connection. Please verify your Client ID and Client Secret in Settings and try again.",
+        isError: true,
+      };
+    }
+  }
 
   async function sync() {
-    setSyncMessage("Synchronizing Xero data…");
+    setSyncMessage("Synchronizing with Xero using If-Modified-Since efficiency…");
     try {
       const result = await xeroService.sync();
-      setSyncMessage(result.ok ? `Sync complete: ${result.accounts} accounts and ${result.invoices} invoices loaded.` : result.error ?? "Sync failed.");
+      if (result.ok) {
+        const count = result.newOrUpdated ?? result.invoices ?? 0;
+        if (count === 0 && result.isIncremental) {
+          setSyncMessage(
+            `✓ Up to date! No modified records since last sync (If-Modified-Since). Total ${result.totalInDb ?? "all"} records in database.`
+          );
+        } else if (result.isIncremental) {
+          setSyncMessage(
+            `✓ Incremental sync complete: ${count} modified/new record(s) loaded via If-Modified-Since. Total ${result.totalInDb ?? count} records in database.`
+          );
+        } else {
+          setSyncMessage(
+            `✓ Sync complete: ${count} records loaded. Total ${result.totalInDb ?? count} records in database.`
+          );
+        }
+      } else {
+        setSyncMessage(result.error ?? "Sync failed.");
+      }
     } catch (err) {
       setSyncMessage(err instanceof ApiError ? err.message : "Sync failed contacting Xero.");
     }
   }
 
-  const [clientIdVal, setClientIdVal] = useState("71064ED0A95C4D288389205B2BA4C0C0");
+  // Load purely from PostgreSQL - no hardcoded defaults
+  const [clientIdVal, setClientIdVal] = useState("");
+  const [clientSecretVal, setClientSecretVal] = useState("");
+  const [hasSavedSecret, setHasSavedSecret] = useState(false);
   const [redirectUriVal, setRedirectUriVal] = useState("http://localhost:3000/api/xero/callback");
   const [scopesVal, setScopesVal] = useState("openid profile email offline_access accounting.invoices.read accounting.contacts.read accounting.settings.read");
-  const [loadedFromDb, setLoadedFromDb] = useState(false);
 
   useEffect(() => {
     xeroService
@@ -40,27 +90,44 @@ export default function XeroConnection() {
         if (data.clientId) setClientIdVal(data.clientId);
         if (data.redirectUri) setRedirectUriVal(data.redirectUri);
         if (data.scopes) setScopesVal(data.scopes);
-        setLoadedFromDb(true);
+        if (data.hasSecret) setHasSavedSecret(true);
       })
       .catch(() => {});
   }, []);
 
-  async function saveCredentials(form: FormData) {
+  async function handleSaveCredentials(e: React.FormEvent) {
+    e.preventDefault();
+    if (!clientIdVal.trim()) {
+      setConfigMessage("Please enter a valid Client ID.");
+      return;
+    }
+    if (!clientSecretVal.trim() && !hasSavedSecret) {
+      setConfigMessage("Client Secret is required to configure Xero.");
+      return;
+    }
+
+    setIsSaving(true);
     setConfigMessage("Saving encrypted credentials and scopes to PostgreSQL…");
+
     try {
       const result = await xeroService.saveCredentials({
-        clientId: String(form.get("clientId") || ""),
-        clientSecret: String(form.get("clientSecret") || ""),
-        redirectUri: String(form.get("redirectUri") || ""),
-        scopes: String(form.get("scopes") || ""),
+        clientId: clientIdVal.trim(),
+        clientSecret: clientSecretVal.trim() || undefined,
+        redirectUri: redirectUriVal.trim(),
+        scopes: scopesVal.trim(),
       });
-      setConfigMessage(
-        result.ok
-          ? "✓ Xero credentials & scopes saved in PostgreSQL successfully! You can now connect Xero."
-          : result.error ?? "Unable to save credentials."
-      );
+
+      if (result.ok) {
+        setConfigMessage("✓ Xero credentials & scopes saved in PostgreSQL successfully! You can now click Connect Xero.");
+        setHasSavedSecret(true);
+        setClientSecretVal("");
+      } else {
+        setConfigMessage(result.error ?? "Unable to save credentials to database.");
+      }
     } catch (err) {
       setConfigMessage(err instanceof ApiError ? err.message : "Unable to save credentials.");
+    } finally {
+      setIsSaving(false);
     }
   }
 
@@ -117,14 +184,16 @@ export default function XeroConnection() {
         </div>
       </div>
 
-      <form className="xero-form" action={saveCredentials}>
+      <form className="xero-form" onSubmit={handleSaveCredentials}>
         <label>
           Client ID
           <input
             name="clientId"
             value={clientIdVal}
             onChange={(e) => setClientIdVal(e.target.value)}
+            placeholder="Enter Xero Client ID"
             required
+            autoComplete="off"
           />
         </label>
         <label>
@@ -132,8 +201,10 @@ export default function XeroConnection() {
           <input
             name="clientSecret"
             type="password"
-            defaultValue="zYXYDZbJjavAr-ztdpXEuwHRrpwjZ2iHNjjYxwoqH6alHbLi"
-            required
+            value={clientSecretVal}
+            onChange={(e) => setClientSecretVal(e.target.value)}
+            placeholder={hasSavedSecret ? "•••••••••••••••• (Encrypted in PostgreSQL — leave blank to keep)" : "Enter Xero Client Secret"}
+            autoComplete="new-password"
           />
         </label>
         <label style={{ gridColumn: "span 2" }}>
@@ -184,15 +255,18 @@ export default function XeroConnection() {
             })}
           </div>
         </div>
-        <button className="filter-button" type="submit" style={{ gridColumn: "span 2" }}>
-          Save Xero credentials &amp; scopes to PostgreSQL
+        <button className="filter-button" type="submit" disabled={isSaving} style={{ gridColumn: "span 2" }}>
+          {isSaving ? "Saving to PostgreSQL…" : "Save Xero credentials & scopes to PostgreSQL"}
         </button>
       </form>
-      {configMessage && <p className="xero-status" role="status">{configMessage}</p>}
-      {message && (
-        <p className={`xero-status ${status === "connected" ? "success" : "error"}`} role="status">
-          {message}
-          {organisation ? ` Organisation: ${organisation}.` : ""}
+      {configMessage && (
+        <p className={`xero-status ${configMessage.startsWith("✓") ? "success" : "error"}`} role="status">
+          {configMessage}
+        </p>
+      )}
+      {oauthBanner && (
+        <p className={`xero-status ${oauthBanner.isError ? "error" : "success"}`} role="status">
+          {oauthBanner.text}
         </p>
       )}
       {syncMessage && <p className="xero-status" role="status">{syncMessage}</p>}

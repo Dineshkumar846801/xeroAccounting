@@ -46,181 +46,239 @@ export async function saveConnection(tokens: TokenResponse) {
   );
   return tenant;
 }
-async function activeConnection() { await ensureSchema(); const result = await db().query<{ tenant_id: string; access_token: string; refresh_token: string; expires_at: Date }>("SELECT tenant_id,access_token,refresh_token,expires_at FROM xero_connections ORDER BY updated_at DESC LIMIT 1"); const row = result.rows[0]; if (!row) throw new Error("Connect a Xero organisation in Settings first"); let accessToken = decrypt(row.access_token); if (row.expires_at.getTime() < Date.now() + 120000) { const refreshed = await tokenRequest(new URLSearchParams({ grant_type: "refresh_token", refresh_token: decrypt(row.refresh_token) })); accessToken = refreshed.access_token; await db().query("UPDATE xero_connections SET access_token=$1,refresh_token=$2,expires_at=$3,updated_at=now() WHERE tenant_id=$4", [encrypt(refreshed.access_token), encrypt(refreshed.refresh_token), new Date(Date.now() + refreshed.expires_in * 1000), row.tenant_id]); } return { tenantId: row.tenant_id, accessToken }; }
-export async function syncXeroAccounts() {
-  return syncXeroData();
+async function activeConnection() {
+  await ensureSchema();
+  const result = await db().query<{
+    tenant_id: string;
+    access_token: string;
+    refresh_token: string;
+    expires_at: Date;
+    last_synced_at?: Date | null;
+  }>(
+    "SELECT tenant_id, access_token, refresh_token, expires_at, last_synced_at FROM xero_connections ORDER BY updated_at DESC LIMIT 1"
+  );
+  const row = result.rows[0];
+  if (!row) throw new Error("Connect a Xero organisation in Settings first");
+  let accessToken = decrypt(row.access_token);
+  if (row.expires_at.getTime() < Date.now() + 120000) {
+    const refreshed = await tokenRequest(
+      new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: decrypt(row.refresh_token),
+      })
+    );
+    accessToken = refreshed.access_token;
+    await db().query(
+      "UPDATE xero_connections SET access_token=$1, refresh_token=$2, expires_at=$3, updated_at=now() WHERE tenant_id=$4",
+      [
+        encrypt(refreshed.access_token),
+        encrypt(refreshed.refresh_token),
+        new Date(Date.now() + refreshed.expires_in * 1000),
+        row.tenant_id,
+      ]
+    );
+  }
+  return { tenantId: row.tenant_id, accessToken, lastSyncedAt: row.last_synced_at ? new Date(row.last_synced_at) : null };
 }
 
-export async function syncXeroData() {
-  const { tenantId, accessToken } = await activeConnection();
-  const headers = { Authorization: `Bearer ${accessToken}`, "Xero-tenant-id": tenantId, Accept: "application/json" };
+export interface SyncOptions {
+  fullSync?: boolean;
+  type?: "accounts" | "invoices" | "all";
+}
 
-  // 1. Fetch Accounts from Xero API
-  const accountsResponse = await fetch("https://api.xero.com/api.xro/2.0/Accounts", { headers, cache: "no-store" });
-  if (!accountsResponse.ok) {
-    const text = await accountsResponse.text();
-    throw new Error(`Xero accounts sync failed (${accountsResponse.status}): ${text || accountsResponse.statusText}`);
-  }
-  const accounts = ((await accountsResponse.json()) as { Accounts?: Array<Record<string, unknown>> }).Accounts ?? [];
+export async function syncXeroAccounts() {
+  return syncXeroData({ type: "accounts", fullSync: true });
+}
 
-  // 2. Fetch Invoices with full line items from Xero API (page=1)
-  const invoicesResponse = await fetch("https://api.xero.com/api.xro/2.0/Invoices?page=1", { headers, cache: "no-store" });
-  if (!invoicesResponse.ok) {
-    const text = await invoicesResponse.text();
-    throw new Error(`Xero invoices sync failed (${invoicesResponse.status}): ${text || invoicesResponse.statusText}`);
-  }
-  const invoices = ((await invoicesResponse.json()) as { Invoices?: Array<Record<string, unknown>> }).Invoices ?? [];
+export async function syncXeroData(options: SyncOptions = {}) {
+  const { tenantId, accessToken, lastSyncedAt } = await activeConnection();
+  const baseHeaders: Record<string, string> = {
+    Authorization: `Bearer ${accessToken}`,
+    "Xero-tenant-id": tenantId,
+    Accept: "application/json",
+  };
 
-  // 3. Compute live ledger balances from actual Xero transactions
-  const balancesByAccountCode: Record<string, number> = {};
-  const balancesByAccountId: Record<string, number> = {};
-  let totalReceivablesDue = 0;
-  let totalPayablesDue = 0;
-  let totalPaidToBank = 0;
-  let taxCollected = 0;
-  let taxPaid = 0;
-
-  for (const inv of invoices) {
-    const isReceivable = inv.Type === "ACCREC";
-    const isPayable = inv.Type === "ACCPAY";
-    const amountDue = Number(inv.AmountDue || 0);
-    const amountPaid = Number(inv.AmountPaid || 0);
-    const totalTax = Number(inv.TotalTax || 0);
-
-    if (isReceivable) {
-      totalReceivablesDue += amountDue;
-      totalPaidToBank += amountPaid;
-      taxCollected += totalTax;
-    } else if (isPayable) {
-      totalPayablesDue += amountDue;
-      totalPaidToBank -= amountPaid;
-      taxPaid += totalTax;
-    }
-
-    const lineItems = (inv.LineItems as Array<Record<string, unknown>>) || [];
-    for (const line of lineItems) {
-      const lineAmt = Number(line.LineAmount || 0);
-      const code = line.AccountCode as string | undefined;
-      const id = line.AccountID as string | undefined;
-      if (code) {
-        balancesByAccountCode[code] = (balancesByAccountCode[code] || 0) + lineAmt;
-      }
-      if (id) {
-        balancesByAccountId[id] = (balancesByAccountId[id] || 0) + lineAmt;
-      }
-    }
-  }
-
-  // 4. Try fetching reports if accessible (e.g. Trial Balance or Bank Summary)
-  try {
-    const trialBalanceResponse = await fetch("https://api.xero.com/api.xro/2.0/Reports/TrialBalance", { headers, cache: "no-store" });
-    if (trialBalanceResponse.ok) {
-      const repData = (await trialBalanceResponse.json()) as { Reports?: Array<{ Rows?: Array<any> }> };
-      const rows = repData.Reports?.[0]?.Rows || [];
-      for (const section of rows) {
-        for (const row of section.Rows || []) {
-          if (row.RowType === "Row" && row.Cells && row.Cells.length >= 2) {
-            const accountDesc = String(row.Cells[0]?.Value || "");
-            const debit = Number(row.Cells[1]?.Value || 0);
-            const credit = Number(row.Cells[2]?.Value || 0);
-            const netBalance = Math.abs(debit - credit);
-            for (const a of accounts) {
-              const code = String(a.Code || "");
-              const name = String(a.Name || "");
-              if ((code && accountDesc.includes(code)) || (name && accountDesc.includes(name))) {
-                balancesByAccountId[String(a.AccountID)] = netBalance;
-              }
-            }
-          }
-        }
-      }
-    }
-  } catch {
-    // Reports scope not enabled or optional
-  }
-
-  // 5. Save all accounts and invoices into PostgreSQL database
   const client = await db().connect();
+  let accountsUpdated = 0;
+  let invoicesUpdated = 0;
+  let formattedModifiedSince: string | null = null;
+  let isIncremental = false;
+
   try {
     await client.query("BEGIN");
 
-    for (const a of accounts) {
-      const code = String(a.Code || "");
-      const name = String(a.Name || "").toLowerCase();
-      const type = String(a.Type || "");
+    // 1. Chart of Accounts Sync
+    const shouldSyncAccounts = options.type === "accounts" || options.type === "all" || !options.type;
+    const existingAccounts = await client.query<{ c: string }>(
+      "SELECT COUNT(*) AS c FROM xero_accounts WHERE tenant_id = $1",
+      [tenantId]
+    );
+    const hasExistingAccounts = parseInt(existingAccounts.rows[0]?.c ?? "0", 10) > 0;
 
-      let balance = balancesByAccountId[String(a.AccountID)] || balancesByAccountCode[code] || 0;
+    if (shouldSyncAccounts && (!hasExistingAccounts || options.fullSync || options.type === "accounts")) {
+      const accountsResponse = await fetch("https://api.xero.com/api.xro/2.0/Accounts", {
+        headers: baseHeaders,
+        cache: "no-store",
+      });
+      if (!accountsResponse.ok) {
+        const text = await accountsResponse.text();
+        throw new Error(`Xero accounts sync failed (${accountsResponse.status}): ${text || accountsResponse.statusText}`);
+      }
+      const accData = (await accountsResponse.json()) as { Accounts?: Array<Record<string, unknown>> };
+      const accounts = accData.Accounts ?? [];
 
-      if (code === "610" || name === "accounts receivable") {
-        balance = totalReceivablesDue;
-      } else if (code === "800" || name === "accounts payable") {
-        balance = totalPayablesDue;
-      } else if (code === "090" || (type === "BANK" && name.includes("business bank"))) {
-        balance = totalPaidToBank;
-      } else if (code === "820" || name === "sales tax") {
-        balance = Math.abs(taxCollected - taxPaid);
+      for (const a of accounts) {
+        await client.query(
+          `INSERT INTO xero_accounts (tenant_id, account_id, code, name, type, status, tax_type, description, class)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           ON CONFLICT (tenant_id, account_id) DO UPDATE SET
+             code = EXCLUDED.code,
+             name = EXCLUDED.name,
+             type = EXCLUDED.type,
+             status = EXCLUDED.status,
+             tax_type = EXCLUDED.tax_type,
+             description = EXCLUDED.description,
+             class = EXCLUDED.class,
+             updated_at = now()`,
+          [
+            tenantId,
+            a.AccountID,
+            a.Code ?? null,
+            a.Name,
+            a.Type ?? null,
+            a.Status ?? null,
+            a.TaxType ?? null,
+            a.Description ?? null,
+            a.Class ?? null,
+          ]
+        );
+      }
+      accountsUpdated = accounts.length;
+    }
+
+    // 2. Invoices Sync with If-Modified-Since Efficiency (Per Xero Best Practices)
+    const shouldSyncInvoices = options.type === "invoices" || options.type === "all" || !options.type;
+    if (shouldSyncInvoices) {
+      const invoiceHeaders: Record<string, string> = { ...baseHeaders };
+
+      // Determine timestamp for If-Modified-Since
+      if (!options.fullSync) {
+        if (lastSyncedAt) {
+          // Incremental sync: Only fetch invoices created or updated since last sync
+          // Subtract 10 seconds buffer to guard against clock skew or same-second writes
+          const bufferDate = new Date(Math.max(0, lastSyncedAt.getTime() - 10000));
+          formattedModifiedSince = bufferDate.toUTCString().replace("GMT", "UTC");
+          invoiceHeaders["If-Modified-Since"] = formattedModifiedSince;
+          isIncremental = true;
+        } else {
+          // Initial sync: Xero best practice recommends past 2 years of invoices
+          const twoYearsAgo = new Date(Date.now() - 2 * 365 * 24 * 60 * 60 * 1000);
+          formattedModifiedSince = twoYearsAgo.toUTCString().replace("GMT", "UTC");
+          invoiceHeaders["If-Modified-Since"] = formattedModifiedSince;
+          isIncremental = false;
+        }
       }
 
-      await client.query(`
-        INSERT INTO xero_accounts (tenant_id, account_id, code, name, type, status, tax_type, description, class)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        ON CONFLICT (tenant_id, account_id) DO UPDATE SET
-          code = EXCLUDED.code,
-          name = EXCLUDED.name,
-          type = EXCLUDED.type,
-          status = EXCLUDED.status,
-          tax_type = EXCLUDED.tax_type,
-          description = EXCLUDED.description,
-          class = EXCLUDED.class,
-          updated_at = now()
-      `, [
-        tenantId,
-        a.AccountID,
-        a.Code ?? null,
-        a.Name,
-        a.Type ?? null,
-        a.Status ?? null,
-        a.TaxType ?? null,
-        a.Description ?? null,
-        a.Class ?? null,
-      ]);
+      // Support paging through modified invoices
+      let page = 1;
+      let hasMorePages = true;
+      const allFetchedInvoices: Array<Record<string, unknown>> = [];
+
+      while (hasMorePages && page <= 10) {
+        const invoicesResponse = await fetch(
+          `https://api.xero.com/api.xro/2.0/Invoices?page=${page}`,
+          { headers: invoiceHeaders, cache: "no-store" }
+        );
+
+        // HTTP 304 Not Modified means no invoices were modified since that date/time
+        if (invoicesResponse.status === 304) {
+          hasMorePages = false;
+          break;
+        }
+
+        if (!invoicesResponse.ok) {
+          const text = await invoicesResponse.text();
+          throw new Error(`Xero invoices sync failed (${invoicesResponse.status}): ${text || invoicesResponse.statusText}`);
+        }
+
+        const invData = (await invoicesResponse.json()) as { Invoices?: Array<Record<string, unknown>> };
+        const pageInvoices = invData.Invoices ?? [];
+        allFetchedInvoices.push(...pageInvoices);
+
+        // Xero pages invoices by 100 per page. If fewer than 100, we are on the last page
+        if (pageInvoices.length < 100) {
+          hasMorePages = false;
+        } else {
+          page++;
+        }
+      }
+
+      // Upsert ONLY the modified or newly created invoices into PostgreSQL
+      for (const i of allFetchedInvoices) {
+        await client.query(
+          `INSERT INTO xero_invoices (tenant_id, invoice_id, invoice_number, contact_name, invoice_date, due_date, status, total, amount_due, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+           ON CONFLICT (tenant_id, invoice_id) DO UPDATE SET
+             invoice_number = EXCLUDED.invoice_number,
+             contact_name = EXCLUDED.contact_name,
+             invoice_date = EXCLUDED.invoice_date,
+             due_date = EXCLUDED.due_date,
+             status = EXCLUDED.status,
+             total = EXCLUDED.total,
+             amount_due = EXCLUDED.amount_due,
+             updated_at = now()`,
+          [
+            tenantId,
+            i.InvoiceID,
+            i.InvoiceNumber,
+            (i.Contact as { Name?: string } | undefined)?.Name ?? "—",
+            i.DateString ?? null,
+            i.DueDateString ?? null,
+            i.Status,
+            i.Total ?? 0,
+            i.AmountDue ?? 0,
+          ]
+        );
+      }
+      invoicesUpdated = allFetchedInvoices.length;
     }
 
-    for (const i of invoices) {
-      await client.query(`
-        INSERT INTO xero_invoices (tenant_id, invoice_id, invoice_number, contact_name, invoice_date, due_date, status, total, amount_due)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        ON CONFLICT (tenant_id, invoice_id) DO UPDATE SET
-          invoice_number = EXCLUDED.invoice_number,
-          contact_name = EXCLUDED.contact_name,
-          invoice_date = EXCLUDED.invoice_date,
-          due_date = EXCLUDED.due_date,
-          status = EXCLUDED.status,
-          total = EXCLUDED.total,
-          amount_due = EXCLUDED.amount_due,
-          updated_at = now()
-      `, [
-        tenantId,
-        i.InvoiceID,
-        i.InvoiceNumber,
-        (i.Contact as { Name?: string } | undefined)?.Name ?? "—",
-        i.DateString ?? null,
-        i.DueDateString ?? null,
-        i.Status,
-        i.Total ?? 0,
-        i.AmountDue ?? 0,
-      ]);
-    }
+    // Update last_synced_at timestamp in xero_connections
+    await client.query(
+      "UPDATE xero_connections SET last_synced_at = now(), updated_at = now() WHERE tenant_id = $1",
+      [tenantId]
+    );
+
+    // Get current total counts from PostgreSQL
+    const totalCountRes = await client.query<{ count: string }>(
+      "SELECT COUNT(*) AS count FROM xero_invoices WHERE tenant_id = $1",
+      [tenantId]
+    );
+    const totalInDb = parseInt(totalCountRes.rows[0]?.count ?? "0", 10);
+
+    const accountsCountRes = await client.query<{ count: string }>(
+      "SELECT COUNT(*) AS count FROM xero_accounts WHERE tenant_id = $1",
+      [tenantId]
+    );
+    const totalAccountsInDb = parseInt(accountsCountRes.rows[0]?.count ?? "0", 10);
 
     await client.query("COMMIT");
+
+    return {
+      ok: true,
+      newOrUpdated: invoicesUpdated,
+      invoices: invoicesUpdated,
+      accounts: accountsUpdated || totalAccountsInDb,
+      totalInDb,
+      isIncremental,
+      modifiedSince: formattedModifiedSince,
+    };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
   } finally {
     client.release();
   }
-
-  return { accounts: accounts.length, invoices: invoices.length };
 }
 
 

@@ -32,11 +32,25 @@ export default function SyncButton({ type = "accounts", label = "Sync from Xero"
           isError: true,
         });
       } else {
-        const count = data.accounts ?? data.invoices ?? 0;
-        setStatus({
-          message: `Successfully synchronized ${count} ${type === "accounts" ? "accounts" : "records"} from Xero!`,
-          isError: false,
-        });
+        const newOrUpdated = data.newOrUpdated ?? data.invoices ?? data.accounts ?? 0;
+        const total = data.totalInDb;
+
+        if (newOrUpdated === 0 && data.isIncremental) {
+          setStatus({
+            message: `✓ Up to date! No modified records since last sync (If-Modified-Since). All ${total ?? "existing"} records loaded from database.`,
+            isError: false,
+          });
+        } else if (data.isIncremental) {
+          setStatus({
+            message: `✓ Incremental sync complete: ${newOrUpdated} modified/new record(s) fetched via If-Modified-Since! Total in database: ${total ?? newOrUpdated}.`,
+            isError: false,
+          });
+        } else {
+          setStatus({
+            message: `✓ Successfully synchronized ${newOrUpdated} record(s) from Xero! Total in database: ${total ?? newOrUpdated}.`,
+            isError: false,
+          });
+        }
         router.refresh();
       }
     } catch (err) {

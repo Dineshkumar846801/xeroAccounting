@@ -147,6 +147,10 @@ export interface SyncResponse {
   ok: boolean;
   accounts?: number;
   invoices?: number;
+  newOrUpdated?: number;
+  totalInDb?: number;
+  isIncremental?: boolean;
+  modifiedSince?: string | null;
   error?: string;
 }
 
@@ -230,10 +234,10 @@ export const xeroService = {
    * Synchronizes accounts and invoices from live Xero API.
    * Deduplicated so multiple concurrent clicks trigger only one sync operation.
    */
-  async sync(type: "accounts" | "invoices" | "all" = "all"): Promise<SyncResponse> {
+  async sync(type: "accounts" | "invoices" | "all" = "all", fullSync = false): Promise<SyncResponse> {
     const res = await apiClient.request<SyncResponse>("/api/xero/sync", {
       method: "POST",
-      body: JSON.stringify({ type }),
+      body: JSON.stringify({ type, fullSync }),
       deduplicate: true,
     });
     // Invalidate workspace cache as sync may update organization/data
@@ -259,7 +263,7 @@ export const xeroService = {
    */
   async saveCredentials(data: {
     clientId: string;
-    clientSecret: string;
+    clientSecret?: string;
     redirectUri: string;
     scopes: string;
   }): Promise<{ ok?: boolean; error?: string }> {

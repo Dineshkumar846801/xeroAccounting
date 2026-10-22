@@ -17,6 +17,7 @@ export async function ensureSchema() {
     CREATE EXTENSION IF NOT EXISTS pgcrypto;
     CREATE TABLE IF NOT EXISTS xero_connections (tenant_id UUID PRIMARY KEY, tenant_name TEXT NOT NULL, tenant_type TEXT NOT NULL, access_token TEXT NOT NULL, refresh_token TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL, scopes TEXT, connected_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
     ALTER TABLE xero_connections ADD COLUMN IF NOT EXISTS scopes TEXT;
+    ALTER TABLE xero_connections ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMPTZ;
     CREATE TABLE IF NOT EXISTS app_users (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
     CREATE TABLE IF NOT EXISTS app_sessions (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_id UUID NOT NULL REFERENCES app_users(id) ON DELETE CASCADE, token_hash TEXT UNIQUE NOT NULL, expires_at TIMESTAMPTZ NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
     CREATE TABLE IF NOT EXISTS xero_credentials (id BOOLEAN PRIMARY KEY DEFAULT true CHECK (id), client_id TEXT NOT NULL, client_secret TEXT NOT NULL, redirect_uri TEXT NOT NULL, scopes TEXT, updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
