@@ -42,6 +42,80 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
   const current = nav.find((item) => item.href === pathname)?.label ?? "Settings";
   const [companyName, setCompanyName] = useState<string>("Demo Company (Global)");
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [desktopVisible, setDesktopVisible] = useState(true);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Initialize and track media query for mobile/tablet breakpoint
+  useEffect(() => {
+    const mql = window.matchMedia("(max-width: 992px)");
+    setIsMobile(mql.matches);
+
+    try {
+      const saved = localStorage.getItem("ledgerly_desktop_sidebar");
+      if (saved !== null) {
+        setDesktopVisible(saved === "true");
+      }
+    } catch {}
+
+    const handleMediaChange = (e: MediaQueryListEvent) => {
+      setIsMobile(e.matches);
+      if (!e.matches) {
+        setMobileOpen(false); // Reset mobile drawer when transitioning to desktop
+      }
+    };
+
+    mql.addEventListener("change", handleMediaChange);
+    return () => mql.removeEventListener("change", handleMediaChange);
+  }, []);
+
+  // Close mobile drawer on route navigation (desktop sidebar retains its state)
+  useEffect(() => {
+    if (isMobile) {
+      setMobileOpen(false);
+    }
+  }, [pathname, isMobile]);
+
+  function toggleSidebar() {
+    if (isMobile) {
+      setMobileOpen((prev) => !prev);
+    } else {
+      setDesktopVisible((prev) => {
+        const next = !prev;
+        try {
+          localStorage.setItem("ledgerly_desktop_sidebar", String(next));
+        } catch {}
+        return next;
+      });
+    }
+  }
+
+  function closeSidebar() {
+    if (isMobile) {
+      setMobileOpen(false);
+    } else {
+      setDesktopVisible(false);
+      try {
+        localStorage.setItem("ledgerly_desktop_sidebar", "false");
+      } catch {}
+    }
+  }
+
+  // Keyboard shortcut: Ctrl+B to toggle sidebar, Escape to close mobile drawer
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
+        e.preventDefault();
+        toggleSidebar();
+      } else if (e.key === "Escape") {
+        if (isMobile && mobileOpen) {
+          setMobileOpen(false);
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isMobile, mobileOpen, desktopVisible]);
 
   // Fetch actual connected Xero organisation dynamically (deduplicated & cached via service)
   useEffect(() => {
@@ -82,7 +156,6 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
     try {
       await authService.logout();
     } catch {}
-    // Replace URL in history so user cannot press Back button into dashboard
     window.location.replace("/login");
   }
 
@@ -91,14 +164,44 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
   }
 
   const initial = companyName ? companyName.trim().charAt(0).toUpperCase() : "X";
+  const isSidebarVisible = isMobile ? mobileOpen : desktopVisible;
 
   return (
-    <main className="app-shell">
-      <aside className="sidebar">
-        <Link href="/" className="brand">
-          <span className="brand-mark">x</span>
-          <span>ledgerly</span>
-        </Link>
+    <main
+      className={`app-shell ${
+        !desktopVisible ? "sidebar-desktop-closed" : ""
+      } ${mobileOpen ? "mobile-sidebar-open" : ""}`}
+    >
+      {/* Mobile/Tablet Backdrop overlay */}
+      {isMobile && mobileOpen && (
+        <div
+          className="sidebar-backdrop"
+          onClick={() => setMobileOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Full Sidebar (never truncated to icon-only) */}
+      <aside className={`sidebar ${mobileOpen ? "open" : ""}`}>
+        <div className="sidebar-header-row">
+          <Link
+            href="/"
+            className="brand"
+            onClick={() => isMobile && setMobileOpen(false)}
+          >
+            <span className="brand-mark">x</span>
+            <span>ledgerly</span>
+          </Link>
+          <button
+            type="button"
+            className="sidebar-close-btn"
+            onClick={closeSidebar}
+            aria-label="Hide sidebar"
+            title="Hide sidebar"
+          >
+            ✕
+          </button>
+        </div>
 
         <div className="workspace-switcher" title={companyName}>
           <span className="workspace-dot">{initial}</span>
@@ -115,18 +218,20 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
               key={item.href}
               href={item.href}
               className={`nav-item ${pathname === item.href ? "active" : ""}`}
+              onClick={() => isMobile && setMobileOpen(false)}
             >
               <Icon name={item.icon} />
-              {item.label}
+              <span>{item.label}</span>
             </Link>
           ))}
           <p className="nav-label second">Manage</p>
           <Link
             href="/settings"
             className={`nav-item ${pathname === "/settings" ? "active" : ""}`}
+            onClick={() => isMobile && setMobileOpen(false)}
           >
             <Icon name="settings" />
-            Settings
+            <span>Settings</span>
           </Link>
         </nav>
 
@@ -153,15 +258,40 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
 
       <section className="content-area">
         <header className="topbar">
-          <div className="breadcrumb">
-            <span>Workspace</span>
-            <b>/</b>
-            <strong>{current}</strong>
+          <div className="topbar-left">
+            <button
+              type="button"
+              className={`sidebar-toggle-btn ${!isSidebarVisible ? "sidebar-is-hidden" : ""}`}
+              onClick={toggleSidebar}
+              aria-label={isSidebarVisible ? "Hide sidebar" : "Show sidebar"}
+              title={isSidebarVisible ? "Hide sidebar (Ctrl+B)" : "Show sidebar (Ctrl+B)"}
+            >
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+            </button>
+            <div className="breadcrumb">
+              <span>Workspace</span>
+              <b>/</b>
+              <strong>{current}</strong>
+            </div>
           </div>
+
           <div className="top-actions">
             <span className="company-badge-top" title={`Active Xero organisation: ${companyName}`}>
               <span className="live-dot" />
-              {companyName}
+              <span className="company-badge-text">{companyName}</span>
             </span>
             <div className="top-avatar" title="Signed in as Administrator">
               AD

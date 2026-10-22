@@ -3,6 +3,7 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { getReportingData, money, date } from "./lib/reporting";
 import { requireAdmin } from "./lib/auth";
+import InvoicesTable from "./components/invoices-table";
 
 async function Content() {
   await connection();
@@ -89,63 +90,7 @@ async function Content() {
             </article>
           </div>
 
-          <section className="panel table-panel">
-            <div className="panel-heading">
-              <div>
-                <h2>All Sales Invoices ({invoices.length} Total)</h2>
-                <p>Complete live list of sales invoices from Xero</p>
-              </div>
-              <Link className="text-button" href="/invoices">
-                Invoices page →
-              </Link>
-            </div>
-            <div className="table-scroll" style={{ maxHeight: "480px", overflowY: "auto" }}>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Invoice</th>
-                    <th>Contact</th>
-                    <th>Invoice date</th>
-                    <th>Due date</th>
-                    <th>Status</th>
-                    <th className="align-right">Total</th>
-                    <th className="align-right">Amount due</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {invoices.map((i) => (
-                    <tr key={i.invoice_number ?? Math.random().toString()}>
-                      <td>
-                        <strong>{i.invoice_number ?? "—"}</strong>
-                      </td>
-                      <td>{i.contact_name}</td>
-                      <td>{date(i.invoice_date)}</td>
-                      <td>{date(i.due_date)}</td>
-                      <td>
-                        <span
-                          className={`status-pill ${
-                            i.status === "PAID"
-                              ? "status-paid"
-                              : i.due_date && i.due_date < today
-                              ? "status-overdue"
-                              : "status-active"
-                          }`}
-                        >
-                          {i.due_date && i.due_date < today && Number(i.amount_due) > 0
-                            ? "OVERDUE"
-                            : i.status}
-                        </span>
-                      </td>
-                      <td className="align-right">{money(i.total)}</td>
-                      <td className="align-right">
-                        <strong>{money(i.amount_due)}</strong>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
+          <InvoicesTable invoices={invoices} today={today} />
         </>
       )}
 
